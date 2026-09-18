@@ -3,8 +3,8 @@
 A single-page sandbox for trying out **Safe to Spend**: a budget pacer that compares the
 time left in a period against the money still allocated for that period.
 
-Everything runs in the browser. No backend, no database, no deployment — generated data
-lives in React state and disappears on refresh.
+Everything runs in the browser. No backend, no database — generated data lives in React
+state and disappears on refresh.
 
 ## Running it
 
@@ -14,6 +14,24 @@ npm run dev
 ```
 
 Then open the URL Vite prints (http://localhost:5173 by default).
+
+## Deployment
+
+Live at **https://panda01.github.io/safe-to-spend-demo/**.
+
+Pushing to `master` republishes it. `.github/workflows/deploy-to-github-pages.yml` builds the
+site on GitHub's runners and hands `dist/` to GitHub Pages, so nothing is built or uploaded
+from a laptop and `dist/` stays out of git.
+
+The site is served from the `/safe-to-spend-demo/` sub-path rather than a domain root, so
+`vite.config.ts` sets `base` to match — for `vite build` and `vite preview` only. Plain
+`npm run dev` stays at the bare `http://localhost:5173/`, so to exercise the deployed path
+layout locally, use the build:
+
+```bash
+npm run build
+npm run preview   # http://localhost:4173/safe-to-spend-demo/
+```
 
 ## What's built so far
 

@@ -1,0 +1,67 @@
+# Builds the Safe to Spend demo with Vite and publishes the static bundle to GitHub Pages,
+# so that https://panda01.github.io/safe-to-spend-demo/ tracks the default branch. Requires
+# Settings -> Pages -> Build and deployment -> Source to be set to "GitHub Actions".
+name: Deploy to GitHub Pages
+
+on:
+  # Runs on pushes targeting the default branch.
+  push:
+    branches: ['master']
+
+  # Allows this workflow to be run by hand from the Actions tab.
+  workflow_dispatch:
+
+# Least privilege by default. The deploy job widens this for itself alone.
+permissions:
+  contents: read
+
+# Allow one concurrent deployment, cancelling any run already in flight.
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  # Installs dependencies and produces dist/. Deliberately holds no Pages write access, so
+  # the third-party lifecycle scripts that `npm ci` executes never see the deployment token.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Pinned to a major rather than lts/*, so that a new Node entering LTS cannot
+          # silently change the build on a run that altered nothing.
+          node-version: '24'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      # Runs `tsc -b && vite build`; a type error fails the deploy before anything ships.
+      - name: Build
+        run: npm run build
+      - name: Setup Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: './dist'
+
+  # Publishes the uploaded artifact. The only job holding pages/id-token write access.
+  deploy:
+    needs: build
+    # workflow_dispatch can be fired from any ref, so guard against a feature branch being
+    # published over production.
+    if: github.ref == 'refs/heads/master'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

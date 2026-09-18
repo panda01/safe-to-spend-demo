@@ -1,5 +1,109 @@
 # AI Journal
 
+## 2026-09-18 17:36 EDT — Publish the demo to GitHub Pages on every push to master
+
+**Intent.** The demo was local-only — the README said outright that there was no deployment.
+It is a pure static bundle (no backend, no database, no environment variables, no network
+calls anywhere in `src/`), so GitHub Pages can serve it as-is. The goal was that pushing to
+`master` publishes the site at https://panda01.github.io/safe-to-spend-demo/ with no manual
+build-and-upload step.
+
+The one real complication is that a *project* page is served from the `/safe-to-spend-demo/`
+sub-path rather than a domain root, so every built asset URL needs that prefix or the page
+loads blank.
+
+Chose GitHub Actions over the `gh-pages` npm package: `gh-pages` builds locally and
+force-pushes `dist/` to a branch when someone runs `npm run deploy`, which would not fire on
+a push and would put build output into git history.
+
+### Files changed
+
+**`vite.config.ts`** — converted from a static config object to a function config, so `base`
+can depend on how the app is being served.
+- Added `GITHUB_PAGES_BASE_PATH`, the `/safe-to-spend-demo/` sub-path constant.
+- The default export is now `defineConfig(({ command, isPreview }) => ...)` rather than
+  `defineConfig({ ... })`; it adds the local `isServingTheProductionBundle` and derives
+  `base` from it.
+- `base` is the sub-path for `vite build` and `vite preview`, and `/` for `vite` (dev). Dev
+  is deliberately left at the domain root for a shorter local URL.
+- Why `isPreview` and not `command` alone: Vite reports `command: 'serve'` for *both* the dev
+  server and the preview server. Keying only on `command === 'build'` would have let preview
+  serve at the root while the files in `dist/` still pointed at the prefix — every asset
+  would 404, and no local check could prove the deployed layout. `isPreview` is optional on
+  `ConfigEnv`, hence the explicit `=== true`.
+- `index.html` needed no edit: Vite rewrites the `/favicon.svg` href itself once `base` is
+  set. Nothing under `src/` reads `import.meta.env.BASE_URL` or holds an absolute path
+  literal, so no component changed.
+
+**`.github/workflows/deploy-to-github-pages.yml`** — new. Builds on push to `master` (this
+repo has no `main`) and on manual dispatch.
+- Split into two jobs rather than one. `build` inherits the top-level
+  `permissions: contents: read` and runs `npm ci` + `npm run build`; only `deploy` declares
+  `pages: write` / `id-token: write`. That keeps the deployment token out of the job where
+  third-party npm lifecycle scripts execute.
+- `deploy` carries `if: github.ref == 'refs/heads/master'`, because `workflow_dispatch` can
+  be fired from any ref and would otherwise publish a feature branch over production.
+- `node-version: '24'` pinned rather than `lts/*`, so a new Node entering LTS cannot change
+  the build on a run that altered nothing. Quoted to keep it a string rather than a YAML int.
+- Actions are SHA-pinned: checkout v7.0.1, setup-node v7.0.0, configure-pages v6.0.0,
+  upload-pages-artifact v5.0.0, deploy-pages v5.0.1.
+- `concurrency: { group: pages, cancel-in-progress: true }`; artifact `path: './dist'`.
+- No `.nojekyll`: Jekyll never runs under the Actions publishing source, and
+  `find dist -name '_*'` returns nothing. It would be silently dropped anyway —
+  `upload-pages-artifact` excludes dotfiles unless `include-hidden-files: true`.
+- No `404.html` SPA fallback: there is no router and no deep links.
+
+**`README.md`**
+- The intro no longer claims "no deployment"; that sentence had become false.
+- Added a **Deployment** section with the live URL, the push-to-publish behaviour, and the
+  `npm run build` / `npm run preview` recipe for checking the sub-path layout locally.
+
+### Verification
+
+`npm run build` and `npm run lint` pass clean. `dist/index.html` carries the prefix on both
+references — `src="/safe-to-spend-demo/assets/index-CyhWDHo8.js"` and
+`href="/safe-to-spend-demo/favicon.svg"` — and `find dist -name '_*'` is empty.
+
+Against `npm run preview`, which announced `http://localhost:4173/safe-to-spend-demo/`
+(confirming `isPreview` took effect):
+
+| Request | Result |
+|---|---|
+| `/` | 302 → `http://localhost:4173/safe-to-spend-demo/` |
+| `/index.html` | 302 → same |
+| `/safe-to-spend-demo/` | 200 |
+| `/safe-to-spend-demo/assets/index-CyhWDHo8.js` | 200 |
+| `/safe-to-spend-demo/favicon.svg` | 200 |
+| `/assets/index-CyhWDHo8.js` (un-prefixed) | 404 |
+
+That last 404 is the point: it is what the deployed site would have served for every asset
+had `base` not been set.
+
+Driven end to end with Playwright at `http://localhost:4173/safe-to-spend-demo/`: the page
+rendered fully rather than an empty `#root` (heading "Safe to Spend", the setup form, Totals,
+and the pacer). Clicking **Generate transactions** moved "Total suggested budget" from
+`$0.00` to `$4,740.54`, proving the bundle executed rather than merely returning 200. The
+network log showed exactly three requests, all 200 and all under the prefix; the console had
+0 messages and 0 errors.
+
+Dev was checked separately on a spare port (`npx vite --port 5199`, to avoid disturbing a dev
+server already running on 5173): `GET /` returned 200 rather than a redirect, and the HTML
+referenced `src="/src/main.tsx"` un-prefixed — so dev is still at the bare root as intended.
+Both servers started for these checks were stopped afterwards, and ports 4173 and 5199 were
+confirmed free.
+
+Not verifiable locally: the Actions run itself, which cannot execute until the workflow is on
+`master`. Also worth recording for whoever adds a router later — `vite preview` runs SPA
+fallback middleware and returned 200 for `/safe-to-spend-demo/nope-does-not-exist.js`, where
+GitHub Pages would 404. Preview can therefore never disprove the need for a `404.html`.
+
+### Still to do (outside the code)
+
+`Settings → Pages → Build and deployment → Source` must be set to **GitHub Actions**. The
+repo already reports `has_pages: true`, but https://panda01.github.io/safe-to-spend-demo/
+currently 404s, so the source is likely still "Deploy from a branch". If the first run goes
+red at the "Setup Pages" step, that setting is why — fix it and re-run from the Actions tab.
+
 ## 2026-09-18 16:06 EDT — Make the M.T.A. adjustable and the M.T.A. multiplier tunable
 
 **Intent.** Two of the three numbers behind the M.T.A. status were hard facts: the M.T.A.
